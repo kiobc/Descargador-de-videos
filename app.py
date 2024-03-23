@@ -3,6 +3,7 @@ import os
 import subprocess  
 import json
 import requests
+import re
 
 app = Flask(__name__)
 path = os.getcwd() + '/output/'
@@ -24,6 +25,13 @@ def download_thumbnail(url, output_path):
         print(e)
         return False
 
+    import re
+
+def limpiar_nombre_archivo(nombre):
+    # Reemplaza los caracteres no válidos en Windows con un guión bajo
+    nombre_limpio = re.sub(r'[<>:"/\\|?*¿]', '_', nombre)
+    return nombre_limpio
+
 @app.route('/')
 
 
@@ -35,20 +43,31 @@ def envia():
     try:
         if request.method == 'POST':
             url = request.form['url']
-            output = path + '%(title)s.%(ext)s'
-            result = subprocess.run([
-                "yt-dlp",
-                "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=webm]/best",
-                "--ffmpeg-location", r"C:\webm\bin",
-                "-o", output,
-                url
-            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            print(result.stdout.decode())
-            print(result.stderr.decode())
-            for file in os.listdir(path):
-                if file.endswith('.mp4'):
-                    output_mp4 = os.path.join(path, file)
-                    return send_file(output_mp4, as_attachment=True)
+            # Obtener la información del video para el título
+            result = subprocess.run(["yt-dlp", "-j", "--skip-download", url], stdout=subprocess.PIPE, text=True)
+            if result.returncode == 0:
+                video_info = json.loads(result.stdout)
+                title = video_info.get("title")
+                title_limpio = limpiar_nombre_archivo(title)
+                output_template = os.path.join(path, f"{title_limpio}.%(ext)s")
+                # Descargar el video
+                result = subprocess.run([
+                    "yt-dlp",
+                    "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=webm]/best",
+                    "--ffmpeg-location", r"C:\webm\bin",
+                    "-o", output_template,
+                    url
+                ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                print(result.stdout.decode())
+                print(result.stderr.decode())
+                # Enviar el archivo MP4 como respuesta
+                for file in os.listdir(path):
+                    if file.startswith(title_limpio) and file.endswith('.mp4'):
+                        output_mp4 = os.path.join(path, file)
+                        return send_file(output_mp4, as_attachment=True)
+            else:
+                print(result.stderr.decode())
+                return "No se pudo obtener la información del video."
     except Exception as e:
         print(e)
         return f"Error: {str(e)}"
